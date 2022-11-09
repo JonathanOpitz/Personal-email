@@ -1,0 +1,160 @@
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import json
+from cProfile import label
+from cgitb import text
+import wx
+from email.message import EmailMessage
+import smtplib
+import ssl
+
+#open the google sheet with the json file as a key 
+#stores objects of the class (Personal Data) for each student in the file
+class initializeObjects:
+	def __init__(self, filename, sheetName = 'sheet1'):
+		self.filename = filename
+		self.sheetName = sheetName
+		self.data=[]
+		self.creatingObjects()
+
+	def openSheet(self):
+		scopes = [
+		'https://www.googleapis.com/auth/spreadsheets',
+		'https://www.googleapis.com/auth/drive'
+		]
+		credentials = ServiceAccountCredentials.from_json_keyfile_name("jsonkey.json", scopes) #access the json key you downloaded earlier
+		file = gspread.authorize(credentials) # authenticate the JSON key with gspread
+		sheet = file.open(self.filename)  #open sheet
+		sheet = sheet.sheet1  #replace sheet_name with the name that corresponds to yours, e.g, it can be sheet1
+		return sheet
+
+	def creatingObjects(self):
+		sheet=self.openSheet()
+		values = sheet.get_all_values()
+		#print (values)
+		for row in values[1:]:
+			object = PersonalData(row[0], row[1])
+			self.data.append(object)
+
+# this class creates each person
+class PersonalData(initializeObjects):
+	def __init__(self,  firstName, email):
+		self.firstName = firstName
+		self.email = email
+
+# this class creates the panel for the user interface
+class Panel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        self.sender = wx.StaticText(self)
+        self.sender.SetLabel("Sender E-mail:")
+        self.password = wx.StaticText(self)
+        self.password.SetLabel("App Password:")
+        self.text = wx.StaticText(self)
+        self.text1= False
+        self.text2= False
+        self.text3= False
+        self.message= wx.StaticText(self)
+        self.message.SetLabel("")
+        self.file_name = wx.StaticText(self)
+        self.file_name.SetLabel("Name of google spreadsheet file:")
+
+        text1 = wx.CheckBox(self, label = "welcome message")
+        text2 = wx.CheckBox(self, label = "first update")
+        text3 = wx.CheckBox(self, label = "introduction week")
+        text1.Bind(wx.EVT_CHECKBOX,self.text1function)
+        text2.Bind(wx.EVT_CHECKBOX,self.text2function)
+        text3.Bind(wx.EVT_CHECKBOX,self.text3function)
+        self.sender_mail = wx.TextCtrl(self,size=(200,20))
+        self.file_name_box = wx.TextCtrl(self,size=(200,20))
+        self.app_password = wx.TextCtrl(self,size=(200,20))
+        sendmail = wx.Button(self, label='Send E-mail')
+        sendmail.Bind(wx.EVT_BUTTON, self.send_mail)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.sender, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.sender_mail, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.password, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.app_password, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.text, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.file_name, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.file_name_box, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(text1, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(text2, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(text3, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(sendmail, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(self.message, 0, wx.ALL | wx.CENTER, 5)
+        self.SetSizer(sizer)
+        self.Fit()
+
+    # this function sends personalized email to every student in the class (initializeObjects)
+    def send_mail(self, event):
+        sender1 = self.sender_mail.GetValue()
+        password1 = self.app_password.GetValue()
+        text=''
+        # these statements check which email template to send
+        if self.text2 == True and self.text1==False and self.text3==False:
+            f = open("first update.txt", 'r')
+            header='First update'
+            for i in f:
+                text+=i
+        elif self.text1 == True and self.text2==False and self.text3==False:
+            f = open("welcome message.txt", 'r')
+            header='Welcome message'
+            for i in f:
+                text+=i
+        elif self.text3 == True and self.text1==False and self.text2==False:
+            f = open("introduction week.txt", 'r')
+            header='Introduction week'
+            for i in f:
+                text+=i 
+        elif self.text3 == False and self.text1==False and self.text2==False:
+            self.message.SetLabel("You have not checked any box, please try one more time")
+            return False
+        
+        #this is where we call the function to create the objects in this specific google sheet
+        obj=initializeObjects(self.file_name_box.GetValue())
+        text2 = text.split('//') #this is where we split the template for where add the first name
+        for i in obj.data:
+            receiver1 = i.email
+            text_text1 = i.firstName.join(text2) #this puts the student's first name into the template
+            em = EmailMessage()
+            #this sets up the email sender function
+            em['From'] = sender1 
+            em['To'] = receiver1
+            em['Subject'] = header
+            em.set_content(text_text1)
+
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as smtp:
+                try:
+                    smtp.login(sender1, password1) #this logs into the account
+                #error message if the input is incorrect
+                except:
+                    self.message.SetLabel("You have input an incorrect email or password, please try one more time")
+                    return False
+                smtp.sendmail(sender1, receiver1, em.as_string()) #this is what actually sends the email
+        self.message.SetLabel("The emails have been sent") #confirmation message
+
+# this checks and unchecks the template buttons 
+    def text1function(self, event):
+        if self.text1 == True:
+            self.text1=False
+        else:
+            self.text1=True
+
+    def text2function(self, event):
+        if self.text2 == True:
+            self.text2=False
+        else:
+            self.text2=True
+    def text3function(self, event):
+        if self.text3 == True:
+            self.text3=False
+        else:
+            self.text3=True
+
+app = wx.App()
+fr = wx.Frame(None, title='Send personalized emails', size=(600,400))
+panel = Panel(fr)
+fr.Show()
+app.MainLoop()
